@@ -22,6 +22,8 @@ const profiles = Object.fromEntries(await Promise.all(['ruby','mina'].map(async 
 const map=world.map, TS=map.tileSize||32, MW=map.width, MH=map.height, P=K.placement;
 const VW=384, VH=288, ZOOM=2;
 const prov = await import('/core/provenance.mjs');
+const core = { persona: await import('/core/persona.mjs'), guard: await import('/core/guard.mjs'), prompt: await import('/core/prompt.mjs') };
+const NAMES = { village_ruby:'루비', village_mina:'미나', village_leo:'리오', village_seoyeon:'서연', village_jiwoo:'지우', village_junho:'준호' };
 const [worldMod,castMod] = await Promise.all([
   import('/spum-cdn/packages/spum-world/runtime/StudioSpumWorldRuntime.js'),
   import('/spum-cdn/packages/spum-world/core/WorldCastSync.js')]);
@@ -72,14 +74,14 @@ addEventListener('keydown', e=>{ if (document.activeElement===$('#i')) return;
   rt.applyAIInteraction('player',{ provider:'game', commands:[
     { type:'moveToTile', targetTile:{ col:a.tile.col+D[0], row:a.tile.row+D[1] }, moveMode:'walk' }] }); });
 function systemFor(n){ const pr=profiles[n], g=K.npcs[n];
-  return [`너는 ${pr.name}. ${pr.occupation}.`, `성격: ${pr.personality.join(', ')}`,
-    `말투와 태도는 네 성격대로. 지금 너는 ${g.where}에 서 있다.`, '',
-    '이 미로에서 네가 아는 것 (전부다):', ...prov.knowledgeLines(g.knows), '',
-    '[대답하는 법]', '· 상대가 실제로 물은 것에 답한다.',
-    '· 위 목록에 없는 길 정보는 지어내지 않는다. 모르면 모른다고 말한다.',
-    ...prov.PROVENANCE_RULES,
+  return core.prompt.systemText([
+    `너는 ${pr.name}. ${pr.occupation}.`,
+    core.persona.fullPersonaLines(pr, { nameOf:id=>NAMES[id]||id }),
+    `지금 너는 ${g.where}에 서 있다.`, '',
+    '이 미로에서 네가 아는 것 (전부다):', prov.knowledgeLines(g.knows), '',
+    '[대답하는 법]', core.prompt.RESPONSE_RULES,
     '· 좌표나 칸 번호로 말하지 마라. 방향과 눈에 보이는 것으로 설명한다.',
-    '· 궁금하면 되묻는다. 앞서 한 말과 어긋나지 않는다.', '· 한두 문장.'].join('\n'); }
+    '· 한두 문장.']); }
 $('#f').onsubmit = async e => { e.preventDefault(); const t=$('#i').value.trim(); if(!t) return;
   if(atGate && /^\s*\d+\s*$/.test(t)){ $('#i').value=''; say('나', t, 'me');
     if (t.replace(/\D/g,'') === K.gate.code) { openGate(); say('', '★ 자물쇠가 풀렸다. 문이 열린다.', 'sys'); }
@@ -91,7 +93,8 @@ $('#f').onsubmit = async e => { e.preventDefault(); const t=$('#i').value.trim()
   const call = async msgs => { const r=await fetch('/api/sam/generate',{method:'POST',headers:{'content-type':'application/json'},
       body:JSON.stringify({ model:'normal', temperature:0.7, max_tokens:300, messages:msgs })});
     const j=await r.json(); return (j.choices?.[0]?.message?.content||j.error||'(빈 응답)').trim(); };
-  try{ const g=await prov.withProvenanceGuard(call, [{role:'system',content:systemFor(n)},...history[n]], K.npcs[n].knows);
+  try{ const g=await core.guard.withGuard(call, [{role:'system',content:systemFor(n)},...history[n]],
+        { items:K.npcs[n].knows, history:history[n] });
     const out=g.text; window.__lastGuard=g;
     w.textContent=(n==='ruby'?'루비: ':'미나: ')+out; history[n].push({role:'assistant',content:out});
   }catch(err){ w.textContent='! '+err.message; } $('#i').blur(); };
