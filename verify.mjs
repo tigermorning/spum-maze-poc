@@ -1,7 +1,7 @@
 /* 미로 자체의 성질을 확인한다 (런타임과 무관):
    입구에서 출구까지 길로만 이어지는가, 갈림길이 있는가. */
 import { carve, W, H } from './maze.mjs';
-const g = carve(Number(process.argv[2] || 7));
+const g = carve(Number(process.argv[2]) || undefined);
 const S = [1, 0], E = [W - 2, H - 1];                 // 입구(위) · 출구(아래)
 const seen = new Set([S.join()]), q = [[...S, 0]];
 let dist = -1;

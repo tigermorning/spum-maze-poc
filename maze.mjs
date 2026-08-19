@@ -7,7 +7,7 @@
 export const W = 25, H = 19;                 // 홀수라야 벽/길이 맞아떨어진다
 export const FLOOR = 2050, WALL = 2077;      // 기본 테마: floor/passable, obstacle_blocking/blocked
 
-export function carve(seed = 7) {
+export function carve(seed = 284) {
   let s = seed; const rnd = () => (s = s * 1103515245 % 2147483647) / 2147483647;
   const g = Array.from({ length: H }, () => Array(W).fill(1));   // 1 = 벽
   const stack = [[1, 1]]; g[1][1] = 0;
@@ -21,8 +21,8 @@ export function carve(seed = 7) {
     g[y + dy / 2][x + dx / 2] = 0; g[y + dy][x + dx] = 0;
     stack.push([x + dx, y + dy]);
   }
-  /* 갈림길을 늘린다 — 외길 하나면 미로라 하기 민망하다 */
-  for (let i = 0; i < 18; i++) {
+  /* 고리는 최소로만 뚫는다. 많이 뚫으면 막다른 길이 사라져 되돌아올 일이 없어진다. */
+  for (let i = 0; i < 2; i++) {
     const x = 2 + Math.floor(rnd() * (W - 4)) | 0, y = 2 + Math.floor(rnd() * (H - 4)) | 0;
     if (g[y][x] === 1 && ((g[y][x - 1] === 0 && g[y][x + 1] === 0) || (g[y - 1][x] === 0 && g[y + 1][x] === 0))) g[y][x] = 0;
   }
@@ -53,7 +53,7 @@ export function toMap(g, id = 'MAP_maze_poc') {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const g = carve(Number(process.argv[2] || 7));
+  const g = carve(Number(process.argv[2]) || undefined);
   const m = toMap(g);
   const open = g.flat().filter(c => !c).length;
   console.error(`${W}x${H} · 길 ${open}칸 · 벽 ${W * H - open}칸`);
