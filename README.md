@@ -68,3 +68,16 @@ maze-editor.png / world-play.png / world-move.png  증거 화면
 런타임이 액터의 **칸 좌표를 공개하지 않는다**. `navAgent.state`·`destination`·`path` 는
 내부에서만 돌고, 외부에는 Event Log 의 상태 문자열만 나온다. 그래서 "벽으로 밀었더니 거부됐다"는
 이벤트 수준의 실측은 못 한다 — 차단은 소스 추적으로 확정했다.
+
+## 1인칭 시야 시험 (`game/fp.html`)
+
+**진짜 1인칭(3D·눈높이)은 SPUM 에 없다.** 엔진은 2D 스프라이트 톱다운이고, 카메라 성분이
+가진 것은 `zoom` 과 `offset` 뿐이다 (`StudioSpumWorldRuntime.js:553-555`, `:3881-3893`).
+공식 위키에는 Studio·카메라 문서가 아예 없다(유니티 캐릭터 메이커 문서뿐).
+
+그래서 **네이티브로 가능한 가장 가까운 것**을 썼다: SPUM 자신의 카메라를 플레이어에 붙였다.
+`rt.setViewport({ cssWidth, cssHeight, zoom, offsetX, offsetY })` 를 매 프레임 부른다
+(`offsetX = 화면폭/2 - 플레이어x*zoom`, 소스의 `transform = (css/2 - offset)/zoom` 에서 뒤집은 것).
+창 384×288, 배율 2 → 한 번에 **6×5칸만 보인다** (전체 25×19).
+
+실측: 방향키 40회 이동 중 **벽 칸에 들어간 횟수 0**, 그중 7회는 벽을 향해 밀어 본 것이고 전부 막혔다.

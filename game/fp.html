@@ -1,0 +1,50 @@
+<meta charset="utf-8"><title>미로 — 1인칭 시야 시험</title>
+<style>
+ body{margin:0;background:#0b0d12;color:#ddd;font:14px system-ui,sans-serif;padding:10px}
+ #view{position:relative;width:384px;height:288px;overflow:hidden;border:1px solid #333}
+ canvas{position:absolute;left:0;top:0;image-rendering:pixelated}
+ #bg{transform-origin:0 0}
+ #hud{margin-top:6px;color:#8a8f9a}
+</style>
+<div id="view"><canvas id="bg" width="800" height="608"></canvas><canvas id="scene" width="384" height="288"></canvas></div>
+<div id="hud">방향키로 걷는다. 보이는 곳만 보인다.</div>
+<script type="module">
+const $=s=>document.querySelector(s);
+const world = await fetch('./world.json').then(r=>r.json());
+const map = world.map, TS = map.tileSize||32, MW = map.width, MH = map.height;
+const VW = 384, VH = 288, ZOOM = 2;                     // 창은 좁고 배율은 크다 → 전체가 안 보인다
+const [worldMod, castMod] = await Promise.all([
+  import('/spum-cdn/packages/spum-world/runtime/StudioSpumWorldRuntime.js'),
+  import('/spum-cdn/packages/spum-world/core/WorldCastSync.js'),
+]);
+const rt = worldMod.createStudioSpumWorldRuntime({ canvas:$('#scene'), log:()=>{} });
+const grid = castMod.runtimeGridForMap(map);            // SPUM 자신의 격자 (obstacle 레이어 반영)
+const charById = Object.fromEntries(world.characters.map(c=>[c.id,c]));
+rt.sync({ grid, cast:[{ instanceId:'player', characterId:'CHAR_msyhqsxp_ID9Q', spawnX:1, spawnY:1, x:1, y:1 }],
+          characterLookup:id=>charById[id]||null, shouldRun:false, unitScale:0.07 });
+rt.setRunning(true); window.__rt = rt;
+
+/* 배경(맵 데이터 그대로 칠한 것) */
+{ const c=$('#bg').getContext('2d'); const obs=map.layers.find(l=>l.type==='obstacle');
+  for(let r=0;r<MH;r++) for(let c2=0;c2<MW;c2++){ c.fillStyle = obs.data[r*MW+c2]>0 ? '#3a3f4b' : '#171a21';
+    c.fillRect(c2*TS,r*TS,TS-1,TS-1); } }
+
+/* 카메라: SPUM 의 setViewport(zoom·offset) 를 플레이어에 맞춰 매 프레임 부른다 */
+const actor = () => rt.getActors().find(a=>a.instanceId==='player') || null;
+function camera(){
+  const a = actor(); if(!a) return;
+  const offX = VW/2 - a.x*ZOOM, offY = VH/2 - a.y*ZOOM;   // 소스: transform = (css/2 - offset)/zoom
+  rt.setViewport({ cssWidth:VW, cssHeight:VH, dpr:1, zoom:ZOOM, offsetX:offX, offsetY:offY });
+  $('#bg').style.transform = `translate(${offX}px, ${offY}px) scale(${ZOOM})`;
+  $('#hud').textContent = `칸 (${a.tile?.col}, ${a.tile?.row}) · 보이는 범위 ${Math.round(VW/TS/ZOOM)}×${Math.round(VH/TS/ZOOM)}칸 / 전체 ${MW}×${MH}칸`;
+}
+setInterval(camera, 100); camera();
+
+addEventListener('keydown', e => {
+  const D = { ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0] }[e.key];
+  if (!D) return; e.preventDefault();
+  const a = actor(); if(!a?.tile) return;
+  rt.applyAIInteraction('player', { provider:'game', commands:[
+    { type:'moveToTile', targetTile:{ col:a.tile.col+D[0], row:a.tile.row+D[1] }, moveMode:'walk' }] });
+});
+</script>

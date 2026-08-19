@@ -1,0 +1,147 @@
+<meta charset="utf-8"><title>미로 — 정보로 길 찾기</title>
+<style>
+ body{margin:0;background:#14161c;color:#e8e4dc;font:15px/1.5 system-ui,sans-serif;display:flex;gap:12px;padding:12px}
+ #left{flex:0 0 auto} canvas{image-rendering:pixelated} #bg{background:#0b0d12}
+ #right{flex:1;max-width:420px;display:flex;flex-direction:column;gap:8px}
+ #log{flex:1;min-height:320px;overflow:auto;background:#1b1e26;padding:10px;border-radius:6px;white-space:pre-wrap}
+ .me{color:#9cc4ff} .npc{color:#ffd9a0} .sys{color:#8a8f9a}
+ form{display:flex;gap:6px} input{flex:1;padding:8px;border-radius:6px;border:1px solid #333;background:#0f1117;color:inherit}
+ button{padding:8px 12px;border-radius:6px;border:1px solid #333;background:#232733;color:inherit;cursor:pointer}
+ #hint{color:#8a8f9a;font-size:13px}
+</style>
+<div id="left"><div style="position:relative;width:800px;height:608px"><canvas id="bg" width="800" height="608" style="position:absolute;left:0;top:0"></canvas><canvas id="scene" width="800" height="608" style="position:absolute;left:0;top:0"></canvas></div>
+ <div id="hint">방향키 이동 · 옆에 선 사람과는 자유롭게 대화 · E 로 문 열기</div></div>
+<div id="right"><div id="log"></div>
+ <form id="f"><input id="i" placeholder="누구랑 얘기하려면 옆으로 가라" autocomplete="off"><button>말하기</button></form></div>
+<script type="module">
+const $=s=>document.querySelector(s);
+const say=(who,t,cls)=>{const d=document.createElement('div');d.className=cls;d.textContent=(who?who+': ':'')+t;$('#log').append(d);$('#log').scrollTop=1e9;return d};
+
+const [world, K] = await Promise.all([fetch('./world.json').then(r=>r.json()), fetch('./knowledge.json').then(r=>r.json())]);
+const profiles = Object.fromEntries(await Promise.all(['ruby','mina'].map(async n=>[n, await fetch('/profiles/'+n+'.json').then(r=>r.json())])));
+const P = K.placement, TS = world.map.tileSize || 32, MW = world.map.width, MH = world.map.height;
+const charById = Object.fromEntries(world.characters.map(c=>[c.id,c]));
+
+/* 빨간 문은 SPUM 맵 오브젝트다 — buildWalkableInfo 가 objects rect 를 통행 불가로 친다. */
+const map = JSON.parse(JSON.stringify(world.map));
+const DOOR = { id:'red_door', name:'빨간 문', color:'#c0392b', rect:{ col:P.door[0], row:P.door[1], width:1, height:1 } };
+map.objects = [DOOR];
+let doorOpen = false;
+
+const [worldMod, castMod] = await Promise.all([
+  import('/spum-cdn/packages/spum-world/runtime/StudioSpumWorldRuntime.js'),
+  import('/spum-cdn/packages/spum-world/core/WorldCastSync.js'),
+]);
+const runtime = worldMod.createStudioSpumWorldRuntime({ canvas:$('#scene'), log:()=>{} });
+
+/* 배경: SPUM 맵의 obstacle/walkable 레이어를 그대로 칠한다 (그림 없이 칸만).
+   테마 타일 그림은 Studio 의 자산 저장소(IndexedDB)에 있어 이 출처에서 못 읽는다. */
+(() => {
+  const ctx = $('#bg').getContext('2d');
+  const obs = world.map.layers.find(l=>l.type==='obstacle');
+  for (let r=0;r<MH;r++) for (let c=0;c<MW;c++) {
+    ctx.fillStyle = obs.data[r*MW+c] > 0 ? '#3a3f4b' : '#171a21';
+    ctx.fillRect(c*TS, r*TS, TS-1, TS-1);
+  }
+  ctx.fillStyle = '#c0392b';                       // 빨간 문 자리는 문이 닫혀 있을 때만
+  window.__paintDoor = open => { ctx.fillStyle = open ? '#171a21' : '#c0392b';
+    ctx.fillRect(P.door[0]*TS, P.door[1]*TS, TS-1, TS-1); };
+  window.__paintDoor(false);
+})();
+
+const CAST = [
+  { key:'player', instanceId:'player', characterId:'CHAR_msyhqsxp_ID9Q', at:P.player },
+  { key:'ruby',   instanceId:'ruby',   characterId:K.npcs.ruby.characterId, at:P.ruby },
+  { key:'mina',   instanceId:'mina',   characterId:K.npcs.mina.characterId, at:P.mina },
+];
+function syncWorld(){
+  map.objects = doorOpen ? [] : [DOOR];                 // 문을 열면 오브젝트를 뺀다 → 격자가 다시 뚫린다
+  const grid = castMod.runtimeGridForMap(map);          // SPUM 자신의 함수로 격자를 굽는다
+  runtime.sync({ grid, cast: CAST.map(c=>({ instanceId:c.instanceId, characterId:c.characterId,
+      spawnX:c.at[0], spawnY:c.at[1], x:c.at[0], y:c.at[1] })),
+    characterLookup: id => charById[id] || null, shouldRun:false, unitScale:0.07 });
+  return grid;
+}
+let grid = syncWorld();
+runtime.setViewport({ cssWidth: MW*TS, cssHeight: MH*TS, dpr:1 });
+runtime.setRunning(true);
+window.__rt = runtime;
+
+/* 플레이어 칸: 런타임이 주는 액터 상태에서 읽는다 (픽셀 추정 아님) */
+const cellOf = id => { const a = (runtime.getActors()||[]).find(a=>a.instanceId===id); if(!a) return null;
+  const t = a.tile || a.grid || null;
+  if (t && Number.isFinite(t.col ?? t.gx)) return [Math.round(t.col ?? t.gx), Math.round(t.row ?? t.gy)];
+  if (Number.isFinite(a.x)) return [Math.round((a.x - TS/2)/TS), Math.round((a.y - TS/2)/TS)];
+  return null; };
+const walkable = (c,r)=> c>=0&&r>=0&&c<MW&&r<MH && grid.grid[r*MW+c] > 0;
+
+let talkTo = null, history = { ruby:[], mina:[] }, won = false;
+function near(){ const p = cellOf('player'); if(!p) return null;
+  for (const n of ['ruby','mina']) { const q = P[n]; if (Math.abs(p[0]-q[0]) + Math.abs(p[1]-q[1]) <= 1) return n; }
+  return null; }
+function tick(){
+  const p = cellOf('player'); if(!p) return;
+  const n = near();
+  if (n !== talkTo) { talkTo = n; $('#i').placeholder = n ? `${n==='ruby'?'루비':'미나'}에게 무엇이든 물어봐라` : '누구랑 얘기하려면 옆으로 가라';
+    if (n) say('', `${n==='ruby'?'루비':'미나'} 옆에 섰다.`, 'sys'); }
+  const d = P.door;
+  if (!doorOpen && Math.abs(p[0]-d[0]) + Math.abs(p[1]-d[1]) === 1 && !tick.doorSeen) { tick.doorSeen = true; say('', '빨간 문 앞이다. E 를 누르면 열린다.', 'sys'); }
+  if (!won && doorOpen && p[0]===P.goal[0] && p[1]===P.goal[1]) { won = true; say('', '★ 문 너머에 닿았다. 목표 도달.', 'sys'); }
+}
+setInterval(tick, 400);
+
+addEventListener('keydown', e=>{
+  if (document.activeElement === $('#i')) return;
+  const D = { ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0] }[e.key];
+  if (D) { e.preventDefault(); const p = cellOf('player'); if(!p) return;
+    const t = [p[0]+D[0], p[1]+D[1]];
+    /* 이동은 SPUM 런타임에 맡긴다 — 벽 판정도 저쪽 몫이다 (moveToTile → 로코모션 → A*) */
+    runtime.applyAIInteraction('player', { provider:'game', summary:'move',
+      commands:[{ type:'moveToTile', targetTile:{ col:t[0], row:t[1] }, moveMode:'walk' }] });
+  }
+  if (e.key === 'e' || e.key === 'E') { const p = cellOf('player'); if(!p) return;
+    if (!doorOpen && Math.abs(p[0]-P.door[0]) + Math.abs(p[1]-P.door[1]) === 1) {
+      doorOpen = true; grid = syncWorld(); window.__paintDoor && window.__paintDoor(true); say('', '빨간 문을 열었다.', 'sys'); }
+  }
+});
+
+/* ── 대화: 프로필(코어) + 게임 지식(게임층) → SAM ───────────── */
+function systemFor(n){
+  const pr = profiles[n], kn = K.npcs[n].knows;
+  return [
+    `너는 ${pr.name}. ${pr.occupation}.`,
+    `성격: ${pr.personality.join(', ')}`,
+    `바람: ${pr.current_desire}`,
+    `내력: ${pr.backstory}`,
+    `최근 기억: ${pr.recent_memories.join(' / ')}`,
+    '',
+    '지금 이 미로에서 네가 아는 것 (전부다):',
+    ...kn.map(s=>'- '+s),
+    '',
+    '[대답하는 법]',
+    '· 상대가 실제로 물은 것에 답한다.',
+    '· 위 목록에 없는 것은 지어내지 않는다. 모르면 모른다고 말한다.',
+    '· 위치를 정확한 좌표로 말하지 마라 — 아는 만큼만, 말로 설명한다.',
+    '· 궁금하면 되묻는다. 앞서 한 말과 어긋나지 않는다.',
+    '· 한두 문장. 길어도 세 문장.',
+  ].join('\n');
+}
+$('#f').onsubmit = async e => {
+  e.preventDefault(); const text = $('#i').value.trim(); if(!text) return;
+  if (!talkTo) { say('', '옆에 아무도 없다.', 'sys'); return; }
+  const n = talkTo; $('#i').value = ''; say('나', text, 'me');
+  history[n].push({ role:'user', content:text });
+  const wait = say(n==='ruby'?'루비':'미나', '…', 'npc');
+  try {
+    const r = await fetch('/api/sam/generate', { method:'POST', headers:{'content-type':'application/json'},
+      body: JSON.stringify({ model:'normal', temperature:0.7, max_tokens:300,
+        messages:[{ role:'system', content: systemFor(n) }, ...history[n]] }) });
+    const j = await r.json();
+    const out = (j.choices?.[0]?.message?.content || j.error || '(빈 응답)').trim();
+    wait.textContent = (n==='ruby'?'루비: ':'미나: ') + out;
+    if (j.choices) history[n].push({ role:'assistant', content: out });
+  } catch (err) { wait.textContent = '! ' + err.message; }
+  $('#i').focus();
+};
+say('', '미로에 들어왔다. 어딘가에 빨간 문이 있다고 한다. 사람을 찾아 물어봐라.', 'sys');
+</script>
