@@ -59,7 +59,7 @@ verify.mjs   미로 자체 검사 — 입구→출구 연결, 갈림길 수 (런
 inject.js    Studio 저장소에 맵을 넣는 스니펫 (타일셋은 앱이 구운 테마를 복사)
 track.js     런타임 위치 측정 — 지도 캔버스로 화면↔칸 보정, 유닛 캔버스로 발 위치
 maze.txt     생성된 미로 그림   maze.json  맵 데이터
-maze-editor.png / world-play.png / world-move.png / seal-test.png  증거 화면
+maze-editor.png / world-play.png / world-move.png  증거 화면
 ```
 
 ## 다음에 확정하려면
