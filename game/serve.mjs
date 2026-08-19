@@ -28,6 +28,10 @@ http.createServer(async (req, res) => {
       const t = await up.text();
       res.writeHead(up.status, { 'Content-Type':'application/json; charset=utf-8' }); return res.end(t);
     }
+    if (u.pathname.startsWith('/core/')) {                     // 코어 모듈 (provenance 등)
+      const f = path.join(HERE, '../../sam-npc-core/src', path.basename(u.pathname));
+      res.writeHead(200, { 'Content-Type': MIME['.mjs'] }); return res.end(fs.readFileSync(f));
+    }
     if (u.pathname.startsWith('/profiles/')) {                 // 인물은 코어 저장소의 프로필을 읽는다
       const f = path.join(HERE, '../../sam-npc-core/profiles/village', path.basename(u.pathname));
       res.writeHead(200, { 'Content-Type': MIME['.json'] }); return res.end(fs.readFileSync(f));

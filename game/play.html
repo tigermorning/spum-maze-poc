@@ -21,6 +21,7 @@ const [world,K] = await Promise.all([fetch('./world.json').then(r=>r.json()), fe
 const profiles = Object.fromEntries(await Promise.all(['ruby','mina'].map(async n=>[n, await fetch('/profiles/'+n+'.json').then(r=>r.json())])));
 const map=world.map, TS=map.tileSize||32, MW=map.width, MH=map.height, P=K.placement;
 const VW=384, VH=288, ZOOM=2;
+const prov = await import('/core/provenance.mjs');
 const [worldMod,castMod] = await Promise.all([
   import('/spum-cdn/packages/spum-world/runtime/StudioSpumWorldRuntime.js'),
   import('/spum-cdn/packages/spum-world/core/WorldCastSync.js')]);
@@ -73,9 +74,10 @@ addEventListener('keydown', e=>{ if (document.activeElement===$('#i')) return;
 function systemFor(n){ const pr=profiles[n], g=K.npcs[n];
   return [`너는 ${pr.name}. ${pr.occupation}.`, `성격: ${pr.personality.join(', ')}`,
     `말투와 태도는 네 성격대로. 지금 너는 ${g.where}에 서 있다.`, '',
-    '이 미로에서 네가 아는 것 (전부다):', ...g.knows.map(s=>'- '+s), '',
+    '이 미로에서 네가 아는 것 (전부다):', ...prov.knowledgeLines(g.knows), '',
     '[대답하는 법]', '· 상대가 실제로 물은 것에 답한다.',
     '· 위 목록에 없는 길 정보는 지어내지 않는다. 모르면 모른다고 말한다.',
+    ...prov.PROVENANCE_RULES,
     '· 좌표나 칸 번호로 말하지 마라. 방향과 눈에 보이는 것으로 설명한다.',
     '· 궁금하면 되묻는다. 앞서 한 말과 어긋나지 않는다.', '· 한두 문장.'].join('\n'); }
 $('#f').onsubmit = async e => { e.preventDefault(); const t=$('#i').value.trim(); if(!t) return;
@@ -86,11 +88,12 @@ $('#f').onsubmit = async e => { e.preventDefault(); const t=$('#i').value.trim()
   if(!talkTo){ say('','옆에 아무도 없다.','sys'); return; }
   const n=talkTo; $('#i').value=''; say('나',t,'me'); history[n].push({role:'user',content:t});
   const w=say(n==='ruby'?'루비':'미나','…','npc');
-  try{ const r=await fetch('/api/sam/generate',{method:'POST',headers:{'content-type':'application/json'},
-      body:JSON.stringify({ model:'normal', temperature:0.7, max_tokens:300,
-        messages:[{role:'system',content:systemFor(n)},...history[n]] })});
-    const j=await r.json(); const out=(j.choices?.[0]?.message?.content||j.error||'(빈 응답)').trim();
-    w.textContent=(n==='ruby'?'루비: ':'미나: ')+out; if(j.choices) history[n].push({role:'assistant',content:out});
+  const call = async msgs => { const r=await fetch('/api/sam/generate',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({ model:'normal', temperature:0.7, max_tokens:300, messages:msgs })});
+    const j=await r.json(); return (j.choices?.[0]?.message?.content||j.error||'(빈 응답)').trim(); };
+  try{ const g=await prov.withProvenanceGuard(call, [{role:'system',content:systemFor(n)},...history[n]], K.npcs[n].knows);
+    const out=g.text; window.__lastGuard=g;
+    w.textContent=(n==='ruby'?'루비: ':'미나: ')+out; history[n].push({role:'assistant',content:out});
   }catch(err){ w.textContent='! '+err.message; } $('#i').blur(); };
 say('','미로 어딘가에 찾아야 할 곳이 있다. 사람을 만나면 물어봐라.','sys');
 </script>
