@@ -81,3 +81,16 @@ maze-editor.png / world-play.png / world-move.png  증거 화면
 창 384×288, 배율 2 → 한 번에 **6×5칸만 보인다** (전체 25×19).
 
 실측: 방향키 40회 이동 중 **벽 칸에 들어간 횟수 0**, 그중 7회는 벽을 향해 밀어 본 것이고 전부 막혔다.
+
+## SPUM + SAM 통합 PoC (`game/play.html`)
+
+미로 · 근접 추적 카메라 · NPC 둘 · SAM 대화를 한 화면에 붙인 것. 실제로 플레이해서 확인했다.
+
+- **SPUM**: 이동은 `applyAIInteraction(moveToTile)` → 로코모션 → A*. 충돌은 obstacle 레이어(SPUM `runtimeGridForMap`).
+  카메라는 `setViewport(zoom·offset)` 로 플레이어를 따라간다. 목적지는 맵의 `spawnPoints` 한 칸(막지 않는 네이티브 데이터).
+- **SAM**: 대화는 `sam-npc-core` 프록시(`/api/sam/generate`)로만 간다. 인격은 `profiles/village/{ruby,mina}.json`
+  을 그대로 읽고, 게임은 **길 안내 지식만** 얹는다(`knowledge.json`). 대사 트리 없음.
+- 실측 플레이: (1,1) 출발 → 51걸음 걸어 미나 만남 → 자유 질문 → 동쪽 힌트 획득 → 루비 만남 →
+  "남쪽은 막다른 길", "남동쪽 끝" 획득 → 잘못된 가지로 45걸음 들어가 막다른 길(3면 막힘) → 되돌아옴 →
+  83걸음 걸어 (23,17) 목적지 도달. 벽 통과 0회.
+- 알아 둘 것: **NPC 가 선 칸은 통행 불가**(런타임 점유 판정)라, NPC 는 경로 옆 곁방에 세워야 길이 막히지 않는다.

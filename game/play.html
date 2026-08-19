@@ -1,0 +1,77 @@
+<meta charset="utf-8"><title>미로 — 물어서 길 찾기</title>
+<style>
+ body{margin:0;background:#0b0d12;color:#ddd;font:14px system-ui,sans-serif;padding:10px;display:flex;gap:12px}
+ #view{position:relative;width:384px;height:288px;overflow:hidden;border:1px solid #333}
+ canvas{position:absolute;left:0;top:0;image-rendering:pixelated} #bg{transform-origin:0 0}
+ #right{flex:1;max-width:400px;display:flex;flex-direction:column;gap:6px}
+ #log{flex:1;height:300px;overflow:auto;background:#161922;padding:8px;border-radius:6px;white-space:pre-wrap}
+ .me{color:#9cc4ff} .npc{color:#ffd9a0} .sys{color:#8a8f9a}
+ form{display:flex;gap:6px} input{flex:1;padding:7px;border-radius:6px;border:1px solid #333;background:#0f1117;color:inherit}
+ button{padding:7px 10px;border-radius:6px;border:1px solid #333;background:#232733;color:inherit;cursor:pointer}
+ #hud{color:#8a8f9a;font-size:13px;margin-top:6px}
+</style>
+<div><div id="view"><canvas id="bg" width="800" height="608"></canvas><canvas id="scene" width="384" height="288"></canvas></div>
+ <div id="hud">방향키로 걷는다</div></div>
+<div id="right"><div id="log"></div>
+ <form id="f"><input id="i" placeholder="사람 옆에 서면 말을 걸 수 있다" autocomplete="off"><button>묻기</button></form></div>
+<script type="module">
+const $=s=>document.querySelector(s);
+const say=(w,t,c)=>{const d=document.createElement('div');d.className=c;d.textContent=(w?w+': ':'')+t;$('#log').append(d);$('#log').scrollTop=1e9;return d};
+const [world,K] = await Promise.all([fetch('./world.json').then(r=>r.json()), fetch('./knowledge.json').then(r=>r.json())]);
+const profiles = Object.fromEntries(await Promise.all(['ruby','mina'].map(async n=>[n, await fetch('/profiles/'+n+'.json').then(r=>r.json())])));
+const map=world.map, TS=map.tileSize||32, MW=map.width, MH=map.height, P=K.placement;
+const VW=384, VH=288, ZOOM=2;
+const [worldMod,castMod] = await Promise.all([
+  import('/spum-cdn/packages/spum-world/runtime/StudioSpumWorldRuntime.js'),
+  import('/spum-cdn/packages/spum-world/core/WorldCastSync.js')]);
+const rt = worldMod.createStudioSpumWorldRuntime({ canvas:$('#scene'), log:()=>{} });
+map.spawnPoints = [{ id:'destination', name:'목적지', col:P.destination[0], row:P.destination[1] }];
+const grid = castMod.runtimeGridForMap(map);            // SPUM 격자 (obstacle 레이어 그대로)
+const charById = Object.fromEntries(world.characters.map(c=>[c.id,c]));
+rt.sync({ grid, cast:[
+    { instanceId:'player', characterId:'CHAR_msyhqsxp_ID9Q', spawnX:P.player[0], spawnY:P.player[1], x:P.player[0], y:P.player[1] },
+    { instanceId:'ruby',   characterId:K.npcs.ruby.characterId, spawnX:P.ruby[0], spawnY:P.ruby[1], x:P.ruby[0], y:P.ruby[1] },
+    { instanceId:'mina',   characterId:K.npcs.mina.characterId, spawnX:P.mina[0], spawnY:P.mina[1], x:P.mina[0], y:P.mina[1] }],
+  characterLookup:id=>charById[id]||null, shouldRun:false, unitScale:0.07 });
+rt.setRunning(true); window.__rt = rt;
+{ const c=$('#bg').getContext('2d'); const obs=map.layers.find(l=>l.type==='obstacle');
+  for(let r=0;r<MH;r++) for(let x=0;x<MW;x++){ c.fillStyle = obs.data[r*MW+x]>0 ? '#3a3f4b' : '#171a21'; c.fillRect(x*TS,r*TS,TS-1,TS-1); } }
+const actor = id => rt.getActors().find(a=>a.instanceId===id) || null;
+function camera(){ const a=actor('player'); if(!a) return;
+  const offX = VW/2 - a.x*ZOOM, offY = VH/2 - a.y*ZOOM;
+  rt.setViewport({ cssWidth:VW, cssHeight:VH, dpr:1, zoom:ZOOM, offsetX:offX, offsetY:offY });
+  $('#bg').style.transform = `translate(${offX}px, ${offY}px) scale(${ZOOM})`; }
+let talkTo=null, won=false, history={ruby:[],mina:[]}, met=new Set();
+function tick(){ const a=actor('player'); if(!a?.tile) return; camera();
+  const p=[a.tile.col,a.tile.row];
+  let near=null; for(const n of ['ruby','mina']) if (Math.abs(p[0]-P[n][0])+Math.abs(p[1]-P[n][1])<=1) near=n;
+  if (near!==talkTo){ talkTo=near; $('#i').placeholder = near ? `${near==='ruby'?'루비':'미나'}에게 무엇이든 물어봐라` : '사람 옆에 서면 말을 걸 수 있다';
+    if (near && !met.has(near)) { met.add(near); say('', `${near==='ruby'?'루비':'미나'}를 만났다.`, 'sys'); } }
+  $('#hud').textContent = `칸 (${p[0]}, ${p[1]}) · 보이는 범위 6×5칸 / 전체 ${MW}×${MH}칸`;
+  if (!won && p[0]===P.destination[0] && p[1]===P.destination[1]) { won=true; say('', '★ 목적지에 닿았다.', 'sys'); } }
+setInterval(tick, 250); tick();
+addEventListener('keydown', e=>{ if (document.activeElement===$('#i')) return;
+  const D={ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0]}[e.key]; if(!D) return; e.preventDefault();
+  const a=actor('player'); if(!a?.tile) return;
+  rt.applyAIInteraction('player',{ provider:'game', commands:[
+    { type:'moveToTile', targetTile:{ col:a.tile.col+D[0], row:a.tile.row+D[1] }, moveMode:'walk' }] }); });
+function systemFor(n){ const pr=profiles[n], g=K.npcs[n];
+  return [`너는 ${pr.name}. ${pr.occupation}.`, `성격: ${pr.personality.join(', ')}`,
+    `말투와 태도는 네 성격대로. 지금 너는 ${g.where}에 서 있다.`, '',
+    '이 미로에서 네가 아는 것 (전부다):', ...g.knows.map(s=>'- '+s), '',
+    '[대답하는 법]', '· 상대가 실제로 물은 것에 답한다.',
+    '· 위 목록에 없는 길 정보는 지어내지 않는다. 모르면 모른다고 말한다.',
+    '· 좌표나 칸 번호로 말하지 마라. 방향과 눈에 보이는 것으로 설명한다.',
+    '· 궁금하면 되묻는다. 앞서 한 말과 어긋나지 않는다.', '· 한두 문장.'].join('\n'); }
+$('#f').onsubmit = async e => { e.preventDefault(); const t=$('#i').value.trim(); if(!t) return;
+  if(!talkTo){ say('','옆에 아무도 없다.','sys'); return; }
+  const n=talkTo; $('#i').value=''; say('나',t,'me'); history[n].push({role:'user',content:t});
+  const w=say(n==='ruby'?'루비':'미나','…','npc');
+  try{ const r=await fetch('/api/sam/generate',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({ model:'normal', temperature:0.7, max_tokens:300,
+        messages:[{role:'system',content:systemFor(n)},...history[n]] })});
+    const j=await r.json(); const out=(j.choices?.[0]?.message?.content||j.error||'(빈 응답)').trim();
+    w.textContent=(n==='ruby'?'루비: ':'미나: ')+out; if(j.choices) history[n].push({role:'assistant',content:out});
+  }catch(err){ w.textContent='! '+err.message; } $('#i').blur(); };
+say('','미로 어딘가에 찾아야 할 곳이 있다. 사람을 만나면 물어봐라.','sys');
+</script>
